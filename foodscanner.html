@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fridge Barcode Tracker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <style>
+        #scanner {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Fridge Barcode Tracker</h1>
+    <p>Scan or manually enter the barcode of your food items to track them.</p>
+
+    <!-- Manual Barcode Entry -->
+    <input type="text" id="barcodeInput" placeholder="Enter or scan barcode">
+    <button onclick="handleBarcode()">Add Item</button>
+
+    <!-- Barcode Scanner -->
+    <button onclick="startScanner()">Start Scanner</button>
+    <button onclick="stopScanner()">Stop Scanner</button>
+    <video id="scanner"></video>
+
+    <ul id="itemList"></ul>
+
+    <script>
+        let isScanning = false;
+
+        // Add item to the list
+        function addItem(barcode, name, expiration) {
+            const itemList = document.getElementById("itemList");
+            const item = document.createElement("li");
+            item.textContent = `Barcode: ${barcode}, Name: ${name}, Expiration: ${expiration}`;
+            itemList.appendChild(item);
+        }
+
+        // Handle the input barcode
+        async function handleBarcode() {
+            const barcode = document.getElementById("barcodeInput").value.trim();
+            if (!barcode) {
+                alert("Please enter or scan a barcode.");
+                return;
+            }
+            await fetchProductDetails(barcode);
+        }
+
+        // Start the barcode scanner
+        function startScanner() {
+            if (isScanning) return;
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector("#scanner"),
+                    constraints: {
+                        facingMode: "environment" // Use rear camera
+                    }
+                },
+                decoder: {
+                    readers: ["ean_reader", "upc_reader"] // Support common barcode types
+                }
+            }, function(err) {
+                if (err) {
+                    console.error(err);
+                    alert("Failed to initialize barcode scanner.");
+                    return;
+                }
+                Quagga.start();
+                isScanning = true;
+            });
+
+            Quagga.onDetected(function(result) {
+                const barcode = result.codeResult.code;
+                document.getElementById("barcodeInput").value = barcode;
+                stopScanner();
+                handleBarcode();
+            });
+        }
+
+        // Stop the barcode scanner
+        function stopScanner() {
+            if (!isScanning) return;
+
+            Quagga.stop();
+            isScanning = false;
+        }
+
+        // Fetch product details from multiple registries
+        async function fetchProductDetails(barcode) {
+            // 1. Try Open Food Facts
+            const openFoodFactsUrl = `https://world.openfoodfacts.org/api/v0/product/${barcode}.json`;
+            try {
+                const response = await fetch(openFoodFactsUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 1) {
+                        const product = data.product;
+                        const name = product.product_name || "Unknown Product";
+                        const expiration = product.expiration_date || "No data available";
+                        addItem(barcode, name, expiration);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error("Open Food Facts failed:", error);
+            }
+
+            // 2. Try UPC Database
+            const upcDatabaseUrl = `https://api.upcdatabase.org/product/${barcode}?apikey=YOUR_UPC_API_KEY`;
+            try {
+                const response = await fetch(upcDatabaseUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.valid) {
+                        const name = data.title || "Unknown Product";
+                        const expiration = "No data available";
+                        addItem(barcode, name, expiration);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error("UPC Database failed:", error);
+            }
+
+            // 3. Try Edamam
+            const edamamAppId = "YOUR_EDAMAM_APP_ID";
+            const edamamAppKey = "YOUR_EDAMAM_API_KEY";
+            const edamamUrl = `https://api.edamam.com/api/food-database/v2/parser?upc=${barcode}&app_id=${edamamAppId}&app_key=${edamamAppKey}`;
+            try {
+                const response = await fetch(edamamUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.hints && data.hints.length > 0) {
+                        const product = data.hints[0].food;
+                        const name = product.label || "Unknown Product";
+                        const expiration = "No data available";
+                        addItem(barcode, name, expiration);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error("Edamam API failed:", error);
+            }
+
+            alert("Product not found in any registry.");
+        }
+    </script>
+</body>
+</html>
